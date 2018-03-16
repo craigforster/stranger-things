@@ -1,0 +1,210 @@
+load('api_config.js');
+load('api_gpio.js');
+load('api_net.js');
+load('api_sys.js');
+load('api_timer.js');
+load("api_mqtt.js");
+load("api_log.js");
+load('api_neopixel.js');
+
+Log.info('Initializing...');
+
+let led = Cfg.get('pins.led');
+let button = Cfg.get('pins.button');
+
+let pin = 14, numPixels = 100, colorOrder = NeoPixel.RGB;
+let strip = NeoPixel.create(pin, numPixels, colorOrder);
+let state = { christmas: false, on: false, count: 0 };
+
+// Custom function to more realistically flicker the lights
+// Arguments are: GPIO int, number of flickers, data to write for on, length of data to write for on. Off = 0 for same length.
+let flicker = ffi('int cf_flicker(int, int, void *, int)');
+
+strip.clear();
+strip.show();
+
+// Order: red, yellow, blue, orange, green
+let colors = Sys.malloc(numPixels * 3);
+for (let i = 0; i < numPixels; i++) {
+  let color = i % 5;
+  let red = 0;
+  let blue = 0;
+  let green = 0;
+  if ( color === 0 ) {  //red
+    red = 255;
+    blue = 0;
+    green = 0;
+  } else if ( color === 1 ) { //yellow
+    red = 255;
+    blue = 0;
+    green = 255;
+  } else if ( color === 2 ) { //blue
+     red = 0;
+    blue = 255;
+    green = 0;
+  } else if ( color === 3 ) { //orange
+    red = 255;
+    blue = 0;
+    green = 165;
+  } else if ( color === 4 ) { //green
+    red = 0;
+    blue = 0;
+    green = 255;
+  }
+  
+  colors[(3 * i)] = red;
+  colors[(3 * i) + 1] = green;
+  colors[(3 * i) + 2] = blue;
+}
+
+// Set a single pixel to it's assigned color
+let setPixel = function( i ) {
+  strip.setPixel(i, colors[(3*i)], colors[(3*i)+1], colors[(3*i)+2]);
+};
+
+// Set all pixels on to their assigned colors
+let setAllPixels = function() {
+  for (let i = 0; i < numPixels; i++) {
+    setPixel(i);
+  }
+};
+
+// JINGLE BELLS MOTHERFUCKER.
+// Flash all on, all off, once per second until cancelled.
+let christmasTime = function() {
+  Log.info( "Starting timer");
+  state.timer = Timer.set(1000, true, function(){
+    if (state.on) {
+      setAllPixels();
+      state.count++;
+    } else {
+      strip.clear();
+    }
+
+    strip.show();
+    
+    if ( state.on ) {
+      Sys.usleep( 750 * 1000 );
+    }
+
+    state.on = !state.on;
+  }, null);
+};
+
+// HO HO HO
+// Stop flashing
+let christmasIsCancelled = function() {
+  if ( state.timer ) {
+    Log.info( "Cancelling timer" );
+    Timer.del(state.timer);
+  }
+  
+  strip.clear();
+  strip.show();
+};
+
+// Show a single pixel for the amount of time on,
+// then wait the amount of time off before returning
+let showOne = function( i, timeOn, timeOff ) {
+  print( i, timeOn, timeOff );
+  
+  strip.clear();
+  setPixel(i);
+  strip.show();
+  
+  Sys.usleep( timeOn * 1000 );
+  
+  strip.clear();
+  strip.show();
+  Sys.usleep( timeOff * 1000 );
+};
+
+// Calculate a time based on a base time with random jitter
+let howLong = function( time, jitter ) {
+  return time + (Math.rand() % jitter - (jitter/2));
+};
+
+// Light up a series of LEDs, with time to signify the both the time to light and time in-between, with jitter to add variability.
+// @param lights: an array of LED numbers
+// @param time: The time in milliseconds to light them up
+// @param jitter: Add +/- jitter to the above time
+let spellIt = function( sequence, time, jitter ) {
+  flicker(pin, 10, colors, numPixels * 3);
+  
+  time = time || 1000;
+  jitter = jitter || 500;
+  
+  Sys.usleep( time * 1000 );
+  
+  for ( let i = 0; i < sequence.length; i++ ) { 
+    showOne(sequence[i], howLong( time, jitter), howLong(time, jitter));
+  }
+  
+  Sys.usleep( time * 1000 );
+  
+  flicker(pin, 10, colors, numPixels * 3);
+};
+
+MQTT.sub('/request', function(conn, topic, msg) {
+  print(msg);
+  let value = JSON.parse(msg);
+  
+  let cmd = value.cmd;
+  let args = value.args;
+  
+  if ( cmd === 'christmas' ) {
+    state.christmas = args.enabled;
+  } else if ( cmd === 'spell' ) {
+    christmasIsCancelled();
+    spellIt( args.letters, args.time, args.jitter );
+  }
+  
+  if ( state.christmas ) {
+      christmasTime();
+    } else {
+      christmasIsCancelled();
+    }
+}, null);
+
+// Monitor MQTT
+MQTT.setEventHandler(function(conn, ev, edata) {
+  if ( ev === 0 ) return;
+  let evs = '???';
+  if ( ev === MQTT.EV_CONNACK ) {
+      evs = 'Connected to broker';
+			strip.setPixel( 1, 0, 255, 0 );
+			strip.show();
+			
+  } else if ( ev === MQTT.EV_PUBLISH) {
+    evs = 'Message published';
+  } else if ( ev === MQTT.EV_PUBACK) {
+    evs = 'Publish acknowledged';
+  } else if ( ev === MQTT.EV_SUBACK ) {
+    evs = 'Subscribe acknowledged';
+  } else if ( ev === MQTT.EV_UNSUBACK){
+    evs = 'Unsubscribe acknowledged';
+  } else if ( ev === MQTT.EV_CLOSE) {
+    evs = 'Connection to broker was closed';
+  }
+  print('== MQTT event:', ev, evs);
+      
+}, null);
+
+// Monitor network connectivity.
+Net.setStatusEventHandler(function(ev, arg) {
+  let evs = '???';
+  if (ev === Net.STATUS_DISCONNECTED) {
+    evs = 'DISCONNECTED';
+  } else if (ev === Net.STATUS_CONNECTING) {
+    evs = 'CONNECTING';
+    strip.setPixel( 0, 255, 255, 0 );
+		strip.show();
+  } else if (ev === Net.STATUS_CONNECTED) {
+    evs = 'CONNECTED';
+    strip.setPixel( 0, 0, 255, 0 );
+		strip.show();
+  } else if (ev === Net.STATUS_GOT_IP) {
+    evs = 'GOT_IP';
+  }
+  print('== Net event:', ev, evs);
+}, null);

@@ -1,0 +1,41 @@
+---
+swagger: "2.0"
+info:
+  version: "2016-12-20T18:27:47Z"
+  title: "twilio-apigateway"
+basePath: "/Prod"
+schemes:
+- "https"
+paths:
+  /message:
+    get:
+      consumes:
+      - "application/json"
+      produces:
+      - "application/xml"
+      responses:
+        200:
+          description: "200 response"
+          headers:
+            Content-Type:
+              type: "string"
+      x-amazon-apigateway-integration:
+        responses:
+          default:
+            statusCode: "200"
+            responseTemplates:
+              application/xml: "#set($inputRoot = $input.path('$'))\n<?xml version=\"\
+                1.0\" encoding=\"UTF-8\"?>\n<Response>\n    <Message>\n        <Body>\n\
+                \            $inputRoot\n        </Body>\n    </Message>\n</Response> "
+            responseParameters:
+              method.response.header.Content-Type: "'application/xml'"
+        requestTemplates:
+          application/json: "{\n    \"body\" : \"$input.params('Body')\",\n    \"\
+            fromNumber\" : \"$input.params('From')\",\n    \"image\" : \"$input.params('MediaUrl0')\"\
+            ,\n    \"numMedia\" : \"$input.params('NumMedia')\"\n}"
+        # NOTE: Replace <<region>> and <<account>> fields
+        uri: arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:304620415161:function:${stageVariables.LambdaFunctionName}/invocations
+        passthroughBehavior: "when_no_templates"
+        httpMethod: "POST"
+        contentHandling: "CONVERT_TO_TEXT"
+        type: "aws"

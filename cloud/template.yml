@@ -1,0 +1,113 @@
+Resources:
+  
+  SpellQueue:
+    Type: "AWS::SQS::Queue"
+  
+  WillExecutionRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: "Allow"
+              Principal:
+                Service:
+                  - "lambda.amazonaws.com"
+              Action:
+                - "sts:AssumeRole"
+        Path: "/"
+        Policies:
+          - PolicyName: "root"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                -
+                  Effect: "Allow"
+                  Action: 
+                    - "logs:CreateLogGroup"
+                    - "logs:CreateLogStream"
+                    - "logs:PutLogEvents"
+                    - "iot:Publish"
+                    - "sqs:GetQueueUrl"
+                  Resource: "*"
+                -
+                  Effect: "Allow"
+                  Action: 
+                    - "sqs:ReceiveMessage"
+                    - "sqs:DeleteMessage"
+                  Resource: !GetAtt SpellQueue.Arn
+                  
+  WillFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code: ./will
+      Handler: index.handler
+      Runtime: nodejs6.10
+      Role: !GetAtt WillExecutionRole.Arn
+      Environment:
+        Variables:
+          IOT_ENDPOINT: 'https://a2c1l1gbq4iltk.iot.us-east-1.amazonaws.com'
+          QUEUE: !GetAtt SpellQueue.QueueName
+
+  WillTriggerInvoker:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: rate(1 minute)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt WillFunction.Arn
+          Id: "WillFunction"
+
+  PermissionForWillriggerInvoker:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !Ref WillFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt WillTriggerInvoker.Arn
+
+  TwilioExecutionRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: "Allow"
+              Principal:
+                Service:
+                  - "lambda.amazonaws.com"
+              Action:
+                - "sts:AssumeRole"
+        Path: "/"
+        Policies:
+          - PolicyName: "root"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                -
+                  Effect: "Allow"
+                  Action: 
+                    - "logs:CreateLogGroup"
+                    - "logs:CreateLogStream"
+                    - "logs:PutLogEvents"
+                    - "sqs:GetQueueUrl"
+                  Resource: "*"
+                -
+                  Effect: "Allow"
+                  Action: 
+                    - "sqs:SendMessage"
+                  Resource: !GetAtt SpellQueue.Arn
+
+  TwilioFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code: ./twilio
+      Handler: handler.lambda_handler
+      Runtime: python2.7
+      Role: !GetAtt TwilioExecutionRole.Arn
+      MemorySize: 256
+      Timeout: 60
+      Environment:
+        Variables:
+          QUEUE: !GetAtt SpellQueue.QueueName
+

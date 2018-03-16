@@ -1,0 +1,7 @@
+export MOS_PORT=/dev/cu.SLAB_USBtoUART
+export AWS_PROFILE=personal
+
+unset AWS_ACCESS_KEY
+unset AWS_SECRET_KEY
+unset AWS_ACCESS_KEY_ID
+unset AWS_SECRET_ACCESS_KEY
